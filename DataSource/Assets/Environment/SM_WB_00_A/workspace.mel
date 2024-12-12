@@ -1,0 +1,5 @@
+//Maya 2023 Project Definition
+
+workspace -fr "scenes" "scenes";
+workspace -fr "images" "images";
+workspace -fr "particles" "particles";
