@@ -1,0 +1,3 @@
+// Example workspace.mel file
+workspace -fr "images" "images";
+workspace -fr "scenes" "scenes";
