@@ -1,8 +1,0 @@
-directories:
-  output: dist
-  buildResources: build
-appId: com.yourapp.mayalauncher
-win:
-  target: nsis
-files: []
-electronVersion: 34.1.1
