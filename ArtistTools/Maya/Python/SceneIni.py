@@ -1,73 +1,77 @@
 import os
-from PySide6 import QtWidgets, QtCore
-from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile
-from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
-from maya import cmds
+from os import rename
+from traceback import print_tb
 
-# designer.exeで作ったUIファイルを取得する
+from PySide6 import QtWidgets, QtUiTools, QtCore
+from PySide6.QtUiTools import QUiLoader
+from maya.app.general.mayaMixin import MayaQWidgetBaseMixin
+from maya import cmds
+import maya.mel as mel
+
+# QtDesigner.exeで作ったUIファイルを取得する
 CURRENT_FILE = os.path.normpath(__file__)
 path, ext = os.path.splitext(CURRENT_FILE)
 UI_FILE = path + ".ui"
 
+mesh_types = {
+    "SM：プロップ": "SM",
+    "SK：キャラクター": "SK"
+}
 
-## MainWindowクラス（PySide6 & Maya 2025用）
-class MainWindow(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
+## MainWindowを作るクラス
+class MainWindow(MayaQWidgetBaseMixin, QtWidgets.QMainWindow):
     def __init__(self, parent=None):
-        super(MainWindow, self).__init__(parent)
+        super().__init__(parent)
 
-        # UIのロード（PySide6の方法）
-        self.UI = self.load_ui(UI_FILE)
+        # UIのパスを指定
+        loader = QUiLoader()
+        self.ui = loader.load(UI_FILE, self)
+        self.setWindowTitle(self.ui.windowTitle())
+        self.setCentralWidget(self.ui)
 
-        # ウィンドウタイトルをUIから取得
-        self.setWindowTitle(self.UI.windowTitle())
-
-        # ウィジェットをセンターに配置
-        self.setCentralWidget(self.UI)
-
-        # UIのボタンと関数を接続
-        self.UI.FolderSelectButton.clicked.connect(self.FolderSelectButton)
-        self.UI.SceneIniButton.clicked.connect(self.SceneIniButton)
-
-        # フォルダパスを保存するための変数
+        # ウィジェットを取得
         self.folder_path = ""
 
-    def load_ui(self, file_path):
-        """PySide6でのUIロード"""
-        loader = QUiLoader()
-        ui_file = QFile(file_path)
-        ui_file.open(QFile.ReadOnly)
-        ui = loader.load(ui_file, self)
-        ui_file.close()
-        return ui
+        # ボタンのイベント接続
+        self.ui.FolderSelectButton.clicked.connect(self.FolderSelectButton)
+        self.ui.SceneIniButton.clicked.connect(self.SceneIniButton)
+
+        self.comboBoxType = self.ui.findChild(QtWidgets.QComboBox, "comboBoxType")
+        self.comboBoxType.clear()
+        self.comboBoxType.addItems(mesh_types.keys())
+
 
     def FolderSelectButton(self):
-        """フォルダ選択ダイアログ"""
         self.folder_path = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Folder")
         if self.folder_path:
             # 選択したフォルダのパスをラインエディットに表示
-            self.UI.lineEdit2.setText(self.folder_path)
+            self.ui.lineEdit2.setText(self.folder_path)
 
     def SceneIniButton(self):
-        """シーンの初期化処理"""
-        input_text = self.UI.lineEdit.text()
-        base_folder = os.path.join(self.folder_path, input_text)
+        input_text = self.ui.lineEdit.text()
+        mesh_type = mesh_types.get(self.ui.comboBoxType.currentText(), "SM")
+        self.folder_name = mesh_type + "_" + input_text
+        base_folder = os.path.join(self.folder_path, self.folder_name)
 
         if not os.path.exists(self.folder_path):
             os.makedirs(self.folder_path)
-            print(f"ベースフォルダが作成されました: {self.folder_path}")
 
-        # フォルダ構造定義
-        FOLDER_STRUCTURE = {
-            input_text: {
+        folder_structure = {
+            self.folder_name: {
                 "Maya": {
                     "sourceImage": {},
                     "scene": {},
                     "fbx": {}
                 },
-                "SubstancePainter": {"fbx": {}},
-                "SubstanceDesigner": {"fbx": {}},
-                "Houdini": {"fbx": {}}
+                "SubstancePainter": {
+                    "fbx": {}
+                },
+                "SubstanceDesigner": {
+                    "fbx": {}
+                },
+                "Houdini": {
+                    "fbx": {}
+                }
             }
         }
 
@@ -81,12 +85,18 @@ class MainWindow(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
                 if isinstance(subfolders, dict):
                     create_subfolders(folder_path, subfolders)
 
-        # ルートフォルダ内に階層構造を作成
-        create_subfolders(self.folder_path, FOLDER_STRUCTURE)
+        create_subfolders(self.folder_path, folder_structure)
 
         # 1. 新規シーンを作成
         cmds.file(new=True, force=True)
-        cmds.currentUnit(linear='m')
+
+        cmds.spaceLocator(n=self.folder_name, p=(1, 1, 1))
+        cmds.group(em=True, n='Work')
+        cmds.group(em=True, n=self.folder_name + "_Base", p='Work')
+        cmds.group(em=True, n=self.folder_name + "_low", p='Work')
+        cmds.group(em=True, n=self.folder_name + "_high", p='Work')
+        cmds.group(em=True, n="Shelf", p='Work')
+
         print("新しいシーンが作成されました")
 
         # 2. workspace.mel ファイルを作成
@@ -102,17 +112,26 @@ class MainWindow(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         cmds.workspace(base_folder, openWorkspace=True)
         print(f"ワークスペースが適用されました: {base_folder}")
 
-        # 4.グループとロケーターの作成
-        group_work = cmds.group(empty=True, name="Work")
-        group_low = cmds.group(empty=True, name=input_text + "_low")
-        group_high = cmds.group(empty=True, name=input_text + "_high")
-        group_shelf = cmds.group(empty=True, name="Shelf")
-        print(f"グループ '{group_work}''{group_low}''{group_high}''{group_shelf}'を作成しました。")
+        # 4. シーンの保存
+        project_dir = cmds.workspace(query=True, rootDirectory=True)
+        save_name = self.folder_name + ".mb"
+        relative_folder = "Maya/scene/" + save_name
+        save_path = os.path.join(project_dir, relative_folder)
 
-        locator_name = cmds.spaceLocator(name=input_text)[0]
-        cmds.parent(group_shelf, group_work)
-        cmds.parent(group_low, group_work)
-        cmds.parent(group_high, group_work)
-        print(f"ロケーター '{locator_name}' を作成しました。")
+        cmds.file(rename=save_path)
+        cmds.file(save=True, type='mayaBinary', force=True)
+        print(f"シーンが保存されました: {save_path}")
 
+
+
+def closeEvent(self, event):
+    super().closeEvent(event)
+
+
+def main():
+    window = MainWindow()
+    window.show()
+
+if __name__ == "__main__":
+    main()
 
